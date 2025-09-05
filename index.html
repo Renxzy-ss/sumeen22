@@ -5,24 +5,65 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sumeen Portfolio</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 0; padding: 0; }
-    header { background: navy; color: white; text-align: center; padding: 1em; }
-    section { padding: 20px; max-width: 800px; margin: auto; }
-    footer { background: #222; color: white; text-align: center; padding: 1em; }
-    h2 { color: navy; }
+    /* General */
+    body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #f4f4f9; color: #333; }
+    h1, h2 { margin: 0 0 10px; }
+
+    /* Header */
+    header {
+      background: linear-gradient(120deg, #0077b6, #00b4d8);
+      color: white;
+      text-align: center;
+      padding: 50px 20px;
+    }
+    header img {
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      border: 4px solid white;
+      margin-bottom: 15px;
+    }
+
+    /* Sections */
+    section {
+      max-width: 800px;
+      margin: auto;
+      padding: 40px 20px;
+      background: white;
+      margin-top: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    ul { padding-left: 20px; }
+
+    /* Footer */
+    footer {
+      background: #222;
+      color: #aaa;
+      text-align: center;
+      padding: 20px;
+      margin-top: 30px;
+    }
+    a { color: #0077b6; text-decoration: none; }
+    a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
+
+  <!-- Header -->
   <header>
+    <img src="https://via.placeholder.com/120" alt="Profile Photo">
     <h1>Sumeen</h1>
     <p>A humble student portfolio</p>
   </header>
 
+  <!-- About -->
   <section id="about">
     <h2>About Me</h2>
     <p>Hello! I’m Sumeen. I am learning data analysis and programming. I enjoy solving problems and building projects.</p>
   </section>
 
+  <!-- Skills -->
   <section id="skills">
     <h2>Skills</h2>
     <ul>
@@ -33,20 +74,24 @@
     </ul>
   </section>
 
+  <!-- Projects -->
   <section id="projects">
     <h2>Projects</h2>
     <p><b>Project 1:</b> Student Portfolio Website</p>
     <p><b>Project 2:</b> Data Visualization with Python</p>
   </section>
 
+  <!-- Contact -->
   <section id="contact">
     <h2>Contact</h2>
     <p>Email: yourname@email.com</p>
     <p>GitHub: <a href="https://github.com/sumeen22">sumeen22</a></p>
   </section>
 
+  <!-- Footer -->
   <footer>
-    <p>© 2025 Sumeen</p>
+    <p>© 2025 Sumeen | Built with ❤</p>
   </footer>
+
 </body>
 </html>
