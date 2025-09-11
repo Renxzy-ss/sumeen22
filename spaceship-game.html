@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Galaxy Defender 👽🚀</title>
+<style>
+  body {
+    margin: 0;
+    background: black;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    font-family: Arial, sans-serif;
+  }
+  canvas {
+    display: block;
+    border: 2px solid white;
+  }
+  #chatLink {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: #00ffff;
+    color: black;
+    font-weight: bold;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 10px;
+    cursor: pointer;
+    box-shadow: 0 0 10px #00ffff;
+    transition: transform 0.1s ease;
+  }
+  #chatLink:hover {
+    transform: scale(1.05);
+  }
+</style>
+</head>
+<body>
+
+<!-- Chat History Button -->
+<button id="chatLink" onclick="window.open('https://chat.openai.com/', '_blank')">
+  💬 Chat History
+</button>
+
+<canvas id="gameCanvas" width="400" height="600"></canvas>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+/* GAME STATE */
+let ship = { x: 180, y: 550, w: 40, h: 50, speed: 5 };
+let bullets = [];
+let aliens = [];
+let explosions = [];
+let stars = [];
+let score = 0;
+let frameCount = 0;
+let gameOver = false;
+let gameWin = false;
+
+/* STARFIELD */
+for (let i = 0; i < 80; i++) {
+  stars.push({ x: Math.random() * 400, y: Math.random() * 600, r: Math.random()*1.5 });
+}
+
+function playSound(freq, duration=0.1) {
+  try {
+    const ctxAudio = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctxAudio.createOscillator();
+    const gain = ctxAudio.createGain();
+    osc.type = "square";
+    osc.frequency.value = freq;
+    osc.connect(gain);
+    gain.connect(ctxAudio.destination);
+    osc.start();
+    gain.gain.exponentialRampToValueAtTime(0.001, ctxAudio.currentTime + duration);
+    osc.stop(ctxAudio.currentTime + duration);
+  } catch {}
+}
+
+/* DRAW FUNCTIONS */
+function drawBackground() {
+  let gradient = ctx.createRadialGradient(200, 300, 50, 200, 300, 300);
+  gradient.addColorStop(0, "rgba(80,80,200,0.3)");
+  gradient.addColorStop(1, "transparent");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 400, 600);
+
+  ctx.fillStyle = "white";
+  stars.forEach(s => {
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+function drawShip() {
+  ctx.save();
+  ctx.translate(ship.x + ship.w / 2, ship.y + ship.h / 2);
+  ctx.beginPath();
+  ctx.moveTo(0, -ship.h / 2);
+  ctx.lineTo(-ship.w / 2, ship.h / 2);
+  ctx.lineTo(ship.w / 2, ship.h / 2);
+  ctx.closePath();
+  ctx.fillStyle = "#00ffff";
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(0, 0, 6, 0, Math.PI * 2);
+  ctx.fillStyle = "#ffcc00";
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawBullets() {
+  ctx.fillStyle = "red";
+  bullets.forEach(b => ctx.fillRect(b.x, b.y, 4, 10));
+}
+
+function drawAliens() {
+  aliens.forEach(a => {
+    ctx.save();
+    ctx.translate(a.x, a.y);
+    let bob = Math.sin(frameCount * 0.1 + a.x) * 3;
+    ctx.translate(0, bob);
+
+    ctx.beginPath();
+    ctx.ellipse(0, 0, a.r, a.r * 1.2, 0, 0, Math.PI * 2);
+    ctx.fillStyle = "limegreen";
+    ctx.fill();
+
+    ctx.fillStyle = "black";
+    ctx.beginPath();
+    ctx.arc(-a.r/2.5, -a.r/3, a.r/4, 0, Math.PI*2);
+    ctx.arc(a.r/2.5, -a.r/3, a.r/4, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.strokeStyle = "black";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, a.r/4, a.r/3, 0, Math.PI);
+    ctx.stroke();
+
+    ctx.restore();
+  });
+}
+
+function drawExplosions() {
+  explosions.forEach(ex => {
+    ctx.fillStyle = `hsl(${ex.color}, 100%, 50%)`;
+    ctx.beginPath();
+    ctx.arc(ex.x, ex.y, ex.radius, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+function drawScore() {
+  ctx.fillStyle = "white";
+  ctx.font = "16px Arial";
+  ctx.fillText("Score: " + score, 10, 20);
+}
+
+/* GAME LOOP */
+function update() {
+  if (gameOver || gameWin) return;
+
+  frameCount++;
+  stars.forEach(s => {
+    s.y += 0.5;
+    if (s.y > 600) { s.y = 0; s.x = Math.random() * 400; }
+  });
+
+  bullets.forEach(b => b.y -= 7);
+  bullets = bullets.filter(b => b.y > 0);
+
+  aliens.forEach(a => a.y += a.speed);
+  if (Math.random() < 0.02) {
+    aliens.push({ x: Math.random() * 360 + 20, y: -20, r: 15, speed: 1.5 + Math.random()*2 });
+  }
+  aliens = aliens.filter(a => a.y < 620);
+
+  bullets.forEach((b, bi) => {
+    aliens.forEach((a, ai) => {
+      if (Math.hypot(a.x - b.x, a.y - b.y) < a.r) {
+        createExplosion(a.x, a.y);
+        playSound(100, 0.2);
+        aliens.splice(ai, 1);
+        bullets.splice(bi, 1);
+        score++;
+        if (score >= 80) gameWin = true;
+      }
+    });
+  });
+
+  aliens.forEach(a => {
+    if (Math.hypot(a.x - (ship.x+ship.w/2), a.y - (ship.y+ship.h/2)) < a.r+15) {
+      gameOver = true;
+      createExplosion(ship.x + ship.w/2, ship.y);
+    }
+  });
+
+  explosions.forEach(ex => ex.radius += 2);
+  explosions = explosions.filter(ex => ex.radius < 30);
+}
+
+function createExplosion(x, y) {
+  for (let i = 0; i < 6; i++) {
+    explosions.push({ x, y, radius: 2, color: Math.floor(Math.random()*360) });
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, 400, 600);
+  drawBackground();
+  drawShip();
+  drawBullets();
+  drawAliens();
+  drawExplosions();
+  drawScore();
+
+  if (gameOver) {
+    ctx.fillStyle = "red";
+    ctx.font = "30px Arial";
+    ctx.fillText("GAME OVER 💀", 95, 300);
+    ctx.font = "16px Arial";
+    ctx.fillText("Press R to restart", 140, 330);
+  }
+  if (gameWin) {
+    ctx.fillStyle = "lime";
+    ctx.font = "30px Arial";
+    ctx.fillText("YOU WIN! 🏆", 120, 300);
+    ctx.font = "16px Arial";
+    ctx.fillText("Press R to play again", 125, 330);
+  }
+}
+
+function gameLoop() {
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+gameLoop();
+
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowLeft" && ship.x > 0) ship.x -= ship.speed;
+  if (e.key === "ArrowRight" && ship.x + ship.w < canvas.width) ship.x += ship.speed;
+  if (e.key === " " && !gameOver && !gameWin) {
+    bullets.push({ x: ship.x + ship.w/2 - 2, y: ship.y });
+    playSound(300, 0.05);
+  }
+  if (e.key === "r" && (gameOver || gameWin)) {
+    score = 0;
+    aliens = [];
+    bullets = [];
+    explosions = [];
+    ship.x = 180;
+    gameOver = false;
+    gameWin = false;
+  }
+});
+</script>
+</body>
+</html>
