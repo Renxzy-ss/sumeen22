@@ -5,36 +5,113 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sumeen Portfolio</title>
   <style>
-    /* General */
-    body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #f4f4f9; color: #333; }
-    h1, h2 { margin: 0 0 10px; }
+    /* General Styles */
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', sans-serif;
+      background: #f4f4f9;
+      color: #333;
+      line-height: 1.6;
+    }
+    h1, h2, h3 {
+      margin: 0 0 15px;
+      font-weight: 600;
+    }
+    a { color: #0077b6; text-decoration: none; }
+    a:hover { text-decoration: underline; }
 
     /* Header */
     header {
-      background: linear-gradient(120deg, #0077b6, #00b4d8);
+      background: linear-gradient(135deg, #0077b6, #00b4d8, #90e0ef);
       color: white;
       text-align: center;
-      padding: 50px 20px;
+      padding: 60px 20px;
     }
     header img {
-      width: 120px;
-      height: 120px;
+      width: 140px;
+      height: 140px;
       border-radius: 50%;
       border: 4px solid white;
-      margin-bottom: 15px;
+      margin-bottom: 20px;
+      transition: transform 0.3s ease-in-out;
+    }
+    header img:hover {
+      transform: scale(1.1);
+    }
+    header h1 {
+      font-size: 2.5rem;
+    }
+    header h2 {
+      font-weight: 400;
+      font-size: 1.2rem;
+      margin-top: 10px;
     }
 
     /* Sections */
     section {
-      max-width: 800px;
-      margin: auto;
-      padding: 40px 20px;
+      max-width: 900px;
+      margin: 30px auto;
+      padding: 40px 25px;
       background: white;
-      margin-top: 20px;
-      border-radius: 8px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      border-radius: 12px;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+      transition: transform 0.3s ease;
     }
-    ul { padding-left: 20px; }
+    section:hover {
+      transform: translateY(-5px);
+    }
+
+    /* Projects */
+    .projects ul {
+      list-style: none;
+      padding: 0;
+    }
+    .projects li {
+      background: #f1faff;
+      margin: 10px 0;
+      padding: 15px;
+      border-left: 5px solid #0077b6;
+      border-radius: 5px;
+      transition: background 0.3s;
+    }
+    .projects li:hover {
+      background: #e0f7ff;
+    }
+
+    /* Skills */
+    .skills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .skill {
+      background: #0077b6;
+      color: white;
+      padding: 8px 15px;
+      border-radius: 20px;
+      font-size: 0.9rem;
+      transition: background 0.3s;
+    }
+    .skill:hover {
+      background: #00b4d8;
+    }
+
+    /* Contact */
+    .contact {
+      text-align: center;
+    }
+    .contact a {
+      display: inline-block;
+      margin: 10px;
+      padding: 12px 25px;
+      background: #0077b6;
+      color: white;
+      border-radius: 30px;
+      transition: 0.3s;
+    }
+    .contact a:hover {
+      background: #00b4d8;
+    }
 
     /* Footer */
     footer {
@@ -42,35 +119,64 @@
       color: #aaa;
       text-align: center;
       padding: 20px;
-      margin-top: 30px;
+      margin-top: 40px;
+      font-size: 0.9rem;
     }
-    a { color: #0077b6; text-decoration: none; }
-    a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
+  <!-- Header -->
   <header>
     <img src="IMG_2788.jpeg" alt="Sumeen's Profile Photo">
     <h1>Sumeen Shrestha</h1>
-    <h2>Web Developer / Designer</h2>
+    <h2>Web Developer | Designer | Creative Thinker</h2>
   </header>
 
+  <!-- About Section -->
   <section>
     <h2>About Me</h2>
-    <p>Hello! I'm Sumeen, a passionate web developer and designer. Welcome to my portfolio!</p>
+    <p>
+      Hello! I'm <strong>Sumeen</strong>, a passionate web developer and designer. 
+      I love creating modern, user-friendly websites that combine clean design with smooth functionality. 
+      I aim to turn ideas into visually appealing digital experiences.
+    </p>
   </section>
 
-  <section>
+  <!-- Projects Section -->
+  <section class="projects">
     <h2>Projects</h2>
     <ul>
-      <li>Project 1</li>
-      <li>Project 2</li>
-      <li>Project 3</li>
+      <li><strong>Portfolio Website</strong> – A personal portfolio showcasing my work and skills.</li>
+      <li><strong>E-commerce Store</strong> – A responsive online shop with product listings and cart system.</li>
+      <li><strong>Blog Platform</strong> – A content management system for blogs with SEO optimization.</li>
     </ul>
   </section>
 
+  <!-- Skills Section -->
+  <section>
+    <h2>Skills</h2>
+    <div class="skills">
+      <span class="skill">HTML</span>
+      <span class="skill">CSS</span>
+      <span class="skill">JavaScript</span>
+      <span class="skill">React</span>
+      <span class="skill">UI/UX Design</span>
+      <span class="skill">Git & GitHub</span>
+    </div>
+  </section>
+
+  <!-- Contact Section -->
+  <section class="contact">
+    <h2>Contact Me</h2>
+    <p>If you'd like to work together or have any questions, feel free to reach out!</p>
+    <a href="mailto:sumeen@example.com">📧 Email Me</a>
+    <a href="https://www.linkedin.com" target="_blank">💼 LinkedIn</a>
+    <a href="https://github.com" target="_blank">👨‍💻 GitHub</a>
+  </section>
+
+  <!-- Footer -->
   <footer>
-    <p>&copy; 2025 Sumeen Shrestha | <a href="#">Contact</a></p>
+    <p>&copy; 2025 Sumeen Shrestha | Designed with ❤️</p>
   </footer>
 </body>
 </html>
