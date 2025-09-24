@@ -1,0 +1,727 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Galaxy Defender — Controls Left/Right bottom-left, Fire bottom-right</title>
+<style>
+:root {
+--accent: #00ffd8;
+--hud-bg: rgba(0,0,0,0.28);
+}
+html,body { height:100%; margin:0; background:#000; font-family:Inter,system-ui,Arial; -webkit-user-select:none; }
+.wrapper { position:relative; height:100vh; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+
+canvas { border-radius:10px; display:block; touch-action:none; }
+
+/* transparent controls: left pair bottom-left, fire bottom-right */
+.left-controls {
+position: absolute;
+left: 12px;
+bottom: 12px;
+display:flex;
+gap:10px;
+pointer-events:auto;
+z-index: 10;
+}
+.right-controls {
+position: absolute;
+right: 12px;
+bottom: 12px;
+pointer-events:auto;
+z-index: 10;
+}
+.btn {
+width:64px; height:64px; display:flex; align-items:center; justify-content:center;
+border-radius:12px; background: rgba(255,255,255,0.04); color: rgba(255,255,255,0.7);
+border:1px solid rgba(255,255,255,0.06); font-weight:700; user-select:none; -webkit-user-select:none;
+touch-action: manipulation;
+}
+.btn:active { transform: translateY(2px); opacity:0.9; }
+
+.overlay {
+position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+background:linear-gradient(rgba(0,0,0,0.6), rgba(0,0,0,0.4)); z-index:30;
+}
+.card {
+background: rgba(255,255,255,0.03); border-radius:12px; padding:18px; color:white; max-width:520px; text-align:center;
+}
+.playBtn {
+margin-top:12px; background:var(--accent); color:#002; padding:10px 16px; border:none; border-radius:8px; font-weight:700; cursor:pointer;
+}
+
+@media (hover:none) {
+/* make buttons slightly larger on touch devices if desired */
+.btn { width:72px; height:72px; border-radius:14px; }
+}
+</style>
+</head>
+<body>
+<div class="wrapper">
+<canvas id="gameCanvas" width="400" height="600" aria-label="Galaxy Defender"></canvas>
+
+<!-- bottom-left: left & right (horizontal) -->
+<div class="left-controls" id="leftControls">
+<div class="btn" id="leftBtn">◀</div>
+<div class="btn" id="rightBtn">▶</div>
+</div>
+
+<!-- bottom-right: fire -->
+<div class="right-controls" id="rightControls">
+<div class="btn" id="shootBtn">●</div>
+</div>
+
+<!-- Start overlay -->
+<div id="startOverlay" class="overlay">
+<div class="card">
+<h2>Galaxy Defender — Boss Wars</h2>
+<p>Move: ← / → or A / D. Shoot: SPACE or ●. Tap canvas to shoot. Transparent controls: left/right (bottom-left) and fire (bottom-right).</p>
+<p style="opacity:0.9; font-size:13px">Bosses at 20, 40, 60, 80; final boss at 100 (win). Boss kills give +5 points and +1 life.</p>
+<button id="playBtn" class="playBtn">▶ Play</button>
+</div>
+</div>
+
+<!-- End overlay -->
+<div id="endOverlay" class="overlay" style="display:none;">
+<div class="card">
+<h2 id="endTitle">GAME OVER</h2>
+<p id="endText">You scored 0 points.</p>
+<button id="restartBtn" class="playBtn">Play Again</button>
+</div>
+</div>
+</div>
+
+<script>
+/* =========================
+Galaxy Defender — Complete
+Buttons: left/right bottom-left (horizontal), fire bottom-right
+========================= */
+
+/* ---------- Canvas & DPI ---------- */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+const BASE_W = 400;
+const BASE_H = 600;
+
+function resizeCanvas() {
+const margin = 24;
+const maxW = Math.min(window.innerWidth - margin, 720);
+const maxH = Math.min(window.innerHeight - margin, 920);
+const scale = Math.min(maxW / BASE_W, maxH / BASE_H);
+const displayW = Math.floor(BASE_W * scale);
+const displayH = Math.floor(BASE_H * scale);
+const dpr = window.devicePixelRatio || 1;
+canvas.style.width = displayW + 'px';
+canvas.style.height = displayH + 'px';
+canvas.width = Math.floor(BASE_W * scale * dpr);
+canvas.height = Math.floor(BASE_H * scale * dpr);
+ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+/* ---------- Game state ---------- */
+const state = {
+ship: { x: BASE_W/2 - 20, y: BASE_H - 84, w: 40, h: 48, speed: 5, tilt: 0 },
+bullets: [],
+aliens: [],
+alienBullets: [],
+explosions: [],
+starsLayers: [[],[],[]],
+nebulas: [],
+score: 0,
+lives: 3,
+frame: 0,
+playing: false,
+gameOver: false,
+gameWin: false,
+spawnInterval: 60,
+spawnTimer: 0,
+alienBaseSpeed: 1.2,
+lastShot: -90,
+shotCooldown: 10,
+boss: null,
+bossQueue: [20,40,60,80,100],
+nextBossIndex: 0,
+highScore: 0,
+isMuted: false
+};
+
+/* ---------- Persistence ---------- */
+function loadHigh() {
+const v = parseInt(localStorage.getItem('galaxy_high') || '0', 10);
+state.highScore = isNaN(v) ? 0 : v;
+}
+function saveHigh() {
+localStorage.setItem('galaxy_high', String(state.highScore));
+}
+loadHigh();
+
+/* ---------- Background init ---------- */
+function initBackground() {
+state.starsLayers = [[],[],[]];
+for (let L=0; L<3; L++) {
+const count = [40, 28, 18][L];
+for (let i=0;i<count;i++){
+state.starsLayers[L].push({
+x: Math.random()*BASE_W,
+y: Math.random()*BASE_H,
+r: (L===0?0.6: L===1?1.0:1.6) * (0.6 + Math.random()*0.9),
+speed: (L===0?0.2: L===1?0.55:1.0) * (0.6 + Math.random()*0.8)
+});
+}
+}
+state.nebulas = [];
+for (let i=0;i<3;i++){
+state.nebulas.push({
+x: BASE_W*(0.2 + Math.random()*0.6),
+y: BASE_H*(0.15 + Math.random()*0.6),
+r: BASE_W*(0.4 + Math.random()*0.8),
+hue: 160 + Math.random()*200,
+offset: Math.random()*1000
+});
+}
+}
+initBackground();
+
+/* ---------- Utility ---------- */
+function rand(min,max){ return min + Math.random()*(max-min); }
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+
+/* ---------- Input handling (robust) ---------- */
+const pressed = new Set();
+window.addEventListener('keydown', e => {
+pressed.add(e.code);
+if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
+});
+window.addEventListener('keyup', e => pressed.delete(e.code));
+window.addEventListener('blur', () => pressed.clear());
+
+function isPressed(...codes) { for (const c of codes) if (pressed.has(c)) return true; return false; }
+
+/* Pointer/touch buttons */
+const leftBtn = document.getElementById('leftBtn');
+const rightBtn = document.getElementById('rightBtn');
+const shootBtn = document.getElementById('shootBtn');
+const touch = { left:false, right:false, shoot:false };
+
+function wireBtn(el, key) {
+el.addEventListener('pointerdown', e => { e.preventDefault(); touch[key]=true; el.setPointerCapture && el.setPointerCapture(e.pointerId); });
+el.addEventListener('pointerup', e => { e.preventDefault(); touch[key]=false; try{ el.releasePointerCapture && el.releasePointerCapture(e.pointerId); } catch{} });
+el.addEventListener('pointercancel', ()=> touch[key]=false);
+el.addEventListener('pointerleave', ()=> touch[key]=false);
+// fallback
+el.addEventListener('touchstart', e => { e.preventDefault(); touch[key] = true; }, { passive:false });
+el.addEventListener('touchend', e => { e.preventDefault(); touch[key] = false; }, { passive:false });
+}
+wireBtn(leftBtn, 'left');
+wireBtn(rightBtn, 'right');
+wireBtn(shootBtn, 'shoot');
+
+// tap canvas to shoot or start
+canvas.addEventListener('pointerdown', e => {
+e.preventDefault();
+if (state.playing) {
+touch.shoot = true;
+setTimeout(()=> touch.shoot = false, 120);
+} else {
+startGame();
+}
+}, { passive:false });
+canvas.addEventListener('pointerup', e => { touch.shoot = false; });
+
+/* ---------- Audio helper ---------- */
+function playBeep(freq=440, dur=0.06, type='sine') {
+if (state.isMuted) return;
+try {
+const ac = new (window.AudioContext || window.webkitAudioContext)();
+const o = ac.createOscillator();
+const g = ac.createGain();
+o.type = type; o.frequency.value = freq;
+g.gain.value = 0.10;
+o.connect(g); g.connect(ac.destination);
+o.start();
+g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+o.stop(ac.currentTime + dur);
+} catch(e) {}
+}
+
+/* ---------- Entities: spawn normal aliens ---------- */
+function spawnAlien() {
+if (state.boss) return;
+const x = rand(28, BASE_W-28);
+const r = rand(10, 18);
+const speed = state.alienBaseSpeed * (0.9 + Math.random()*0.8);
+const hue = [140, 280, 20][Math.floor(Math.random()*3)];
+const shooter = Math.random() < 0.28;
+const nextShot = state.frame + 60 + Math.floor(Math.random()*160);
+state.aliens.push({ x, y: -r-6, r, speed, hue, shooter, nextShot, pulse: Math.random()*10 });
+}
+
+/* ---------- Boss factory & drawings ---------- */
+function makeBoss(level) {
+const b = { level, x: BASE_W/2, y: 90, vx: 1.2 + level*0.2, lastShot: state.frame, shootInterval: 60 - level*5, osc: Math.random()*1000 };
+if (level === 1) { b.type='tentacle'; b.maxHealth = 70; b.color = 260; b.draw = drawBossTentacle; }
+else if (level === 2) { b.type='skull'; b.maxHealth = 100; b.color = 12; b.draw = drawBossSkull; }
+else if (level === 3) { b.type='warship'; b.maxHealth = 140; b.color = 200; b.draw = drawBossWarship; }
+else if (level === 4) { b.type='hybrid'; b.maxHealth = 180; b.color = 320; b.draw = drawBossHybrid; }
+else { b.type='final'; b.maxHealth = 260; b.color = 36; b.draw = drawBossFinal; }
+b.health = b.maxHealth; return b;
+}
+
+/* Boss draw implementations (simplified, attractive) */
+function drawBossTentacle(b) {
+const cx=b.x, cy=b.y;
+const baseR = 60 + (b.level-1)*6;
+const g = ctx.createRadialGradient(cx,cy,baseR*0.2,cx,cy,baseR*2);
+g.addColorStop(0, `hsla(${b.color},80%,60%,0.22)`); g.addColorStop(1,'transparent'); ctx.fillStyle=g; ctx.beginPath(); ctx.arc(cx,cy,baseR*1.8,0,Math.PI*2); ctx.fill();
+ctx.save(); ctx.translate(cx,cy);
+ctx.fillStyle = `hsl(${b.color},70%,45%)`; ctx.beginPath(); ctx.ellipse(0,0, baseR, baseR*0.9, 0, 0, Math.PI*2); ctx.fill();
+for (let i=0;i<7;i++){
+const a = i*(Math.PI*2/7) + Math.sin(b.osc*0.02 + i)*0.4;
+ctx.beginPath(); ctx.moveTo(Math.cos(a)*(baseR*0.6), Math.sin(a)*(baseR*0.6));
+for (let t=1;t<=5;t++){
+const px = Math.cos(a)*(baseR*0.6 + t*12 + Math.sin(state.frame*0.03 + i + t)*4);
+const py = Math.sin(a)*(baseR*0.6 + t*12 + Math.cos(state.frame*0.03 + i + t)*4);
+ctx.lineTo(px, py);
+}
+ctx.strokeStyle = `hsla(${b.color},80%,60%,0.95)`; ctx.lineWidth=3; ctx.stroke();
+}
+ctx.fillStyle='white'; ctx.beginPath(); ctx.arc(-baseR*0.2, -baseR*0.12, 5,0,Math.PI*2); ctx.arc(baseR*0.25, -baseR*0.18,5,0,Math.PI*2); ctx.fill();
+ctx.fillStyle='red'; ctx.beginPath(); ctx.arc(-baseR*0.2, -baseR*0.12, 2.2,0,Math.PI*2); ctx.arc(baseR*0.25, -baseR*0.18,2.2,0,Math.PI*2); ctx.fill();
+ctx.restore();
+}
+function drawBossSkull(b){
+const cx=b.x, cy=b.y; const R=64+(b.level-1)*6;
+const g=ctx.createRadialGradient(cx,cy,R*0.2,cx,cy,R*2); g.addColorStop(0,`hsla(${b.color},85%,60%,0.18)`); g.addColorStop(1,'transparent'); ctx.fillStyle=g; ctx.beginPath(); ctx.arc(cx,cy,R*1.6,0,Math.PI*2); ctx.fill();
+ctx.save(); ctx.translate(cx,cy);
+ctx.fillStyle = `hsl(${b.color},70%,45%)`; ctx.beginPath(); ctx.ellipse(0,0,R*0.9,R*1.05,0,0,Math.PI*2); ctx.fill();
+ctx.fillStyle='#000'; ctx.beginPath(); ctx.ellipse(-R*0.26,-R*0.18,R*0.18,R*0.12,-0.4,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(R*0.26,-R*0.18,R*0.18,R*0.12,0.4,0,Math.PI*2); ctx.fill();
+ctx.fillStyle='orange'; ctx.beginPath(); ctx.arc(-R*0.26,-R*0.18,R*0.06,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(R*0.26,-R*0.18,R*0.06,0,Math.PI*2); ctx.fill();
+ctx.fillStyle='#eee'; for (let t=-3;t<=3;t++){ ctx.beginPath(); ctx.moveTo(t*6,R*0.22); ctx.lineTo(t*6+4,R*0.36); ctx.lineTo(t*6-4,R*0.36); ctx.closePath(); ctx.fill(); }
+ctx.restore();
+}
+function drawBossWarship(b){
+const cx=b.x,cy=b.y; const w=160+ b.level*8, h=56 + b.level*5;
+const g=ctx.createLinearGradient(cx-w/2,cy-h/2,cx+w/2,cy+h/2); g.addColorStop(0,'rgba(30,120,200,0.12)'); g.addColorStop(1,'rgba(200,220,255,0.04)'); ctx.fillStyle=g; ctx.beginPath(); ctx.ellipse(cx,cy,w*0.6,h*1.3,0,0,Math.PI*2); ctx.fill();
+ctx.save(); ctx.translate(cx,cy); ctx.fillStyle='#2a3a4a'; ctx.beginPath(); ctx.ellipse(0,-6,w*0.45,h*0.9,0,0,Math.PI*2); ctx.fill();
+for (let i=-2;i<=2;i++){ ctx.fillStyle='#99d'; ctx.fillRect(i*34-6, -h*0.6, 12, -18); }
+for (let i=-3;i<=3;i++){ ctx.fillStyle='rgba(0,255,200,0.85)'; ctx.beginPath(); ctx.arc(i*18,-2,4,0,Math.PI*2); ctx.fill(); }
+ctx.restore();
+}
+function drawBossHybrid(b){
+drawBossWarship(b); // reuse some mechanical look, add organic arcs
+const cx=b.x, cy=b.y; ctx.save(); ctx.translate(cx,cy);
+const R = 70 + b.level*6; ctx.strokeStyle='rgba(255,255,255,0.06)'; for (let i=0;i<6;i++){ ctx.beginPath(); ctx.ellipse(0,0,R-(i*8),(R-(i*8))*0.9,i*0.2,0,Math.PI*2); ctx.stroke(); }
+ctx.restore();
+}
+function drawBossFinal(b){
+drawBossHybrid(b);
+ctx.beginPath(); ctx.fillStyle='rgba(255,200,140,0.06)'; ctx.arc(b.x,b.y,40+Math.sin(state.frame*0.08)*8,0,Math.PI*2); ctx.fill();
+}
+
+/* ---------- Boss firing patterns ---------- */
+function bossFire(b) {
+if (!b) return;
+if (state.frame - b.lastShot < b.shootInterval) return;
+b.lastShot = state.frame;
+if (b.type === 'tentacle') {
+const n = 6 + Math.floor(b.level/1.2);
+for (let i=0;i<n;i++){
+const ang = Math.PI/2 + (i - (n-1)/2) * 0.18;
+const speed = 2 + b.level*0.06;
+state.alienBullets.push({ x: b.x + Math.cos(ang)*30, y: b.y + Math.sin(ang)*30, vx: Math.cos(ang)*speed, vy: Math.sin(ang)*speed, life:240 });
+}
+} else if (b.type === 'skull') {
+const shots = 4 + Math.floor(b.level/2);
+for (let i=0;i<shots;i++){
+const shipCx = state.ship.x + state.ship.w/2, shipCy = state.ship.y + state.ship.h/2;
+let dx = shipCx - b.x + rand(-20,20), dy = shipCy - b.y + rand(-10,10);
+const len = Math.hypot(dx,dy) || 1;
+const speed = 2.2 + b.level*0.06;
+state.alienBullets.push({ x: b.x, y: b.y, vx: dx/len*speed, vy: dy/len*speed, life:240 });
+}
+} else if (b.type === 'warship') {
+const count = 6 + Math.floor(b.level/2);
+for (let i=0;i<count;i++){
+const angle = Math.PI/2 + (i - (count-1)/2) * 0.14;
+const speed = 2.6 + b.level*0.06;
+state.alienBullets.push({ x: b.x + Math.cos(angle)*40, y: b.y + Math.sin(angle)*20, vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed, life:240});
+}
+} else { // hybrid/final
+for (let k=0;k<3;k++){
+const shipCx = state.ship.x + state.ship.w/2, shipCy = state.ship.y + state.ship.h/2;
+let dx = shipCx - b.x + rand(-30,30), dy = shipCy - b.y + rand(-20,20);
+const len = Math.hypot(dx,dy) || 1;
+const speed = 2.4 + b.level*0.08;
+state.alienBullets.push({ x: b.x, y: b.y, vx: dx/len*speed, vy: dy/len*speed, life:240 });
+}
+const n = 10;
+for (let i=0;i<n;i++){
+const a = (i/n)*Math.PI*2 + (state.frame*0.05);
+const s = 1.8 + b.level*0.02;
+state.alienBullets.push({ x: b.x + Math.cos(a)*30, y: b.y + Math.sin(a)*20, vx: Math.cos(a)*s, vy: Math.sin(a)*s, life:160 });
+}
+}
+}
+
+/* ---------- Spawn boss when threshold reached ---------- */
+function trySpawnBoss() {
+if (state.boss) return;
+if (state.nextBossIndex >= state.bossQueue.length) return;
+const nextAt = state.bossQueue[state.nextBossIndex];
+if (state.score >= nextAt) {
+state.boss = makeBoss(state.nextBossIndex+1);
+state.nextBossIndex++;
+}
+}
+
+/* ---------- Collision helpers ---------- */
+function createExplosion(x,y,count=10) {
+for (let i=0;i<count;i++){
+state.explosions.push({ x: x + rand(-6,6), y: y + rand(-6,6), vx: rand(-2,2), vy: rand(-2,2), life: 18 + Math.floor(Math.random()*18), color: Math.floor(Math.random()*360) });
+}
+}
+
+/* ---------- Update ---------- */
+function update() {
+if (!state.playing) return;
+state.frame++;
+
+// background movement
+state.starsLayers.forEach((layer, L) => {
+layer.forEach(s => {
+s.y += s.speed * (0.8 + L*0.45);
+if (s.y > BASE_H + 8) { s.y = -6; s.x = Math.random()*BASE_W; }
+});
+});
+state.nebulas.forEach(n => { n.x += Math.sin((state.frame*0.002) + n.offset)*0.08; n.y += Math.cos((state.frame*0.001) + n.offset)*0.06; });
+
+// input
+const left = isPressed('ArrowLeft','KeyA') || touch.left;
+const right = isPressed('ArrowRight','KeyD') || touch.right;
+const shoot = isPressed('Space') || touch.shoot;
+
+if (left) { state.ship.x = clamp(state.ship.x - state.ship.speed, 6, BASE_W - state.ship.w - 6); state.ship.tilt = -0.12; }
+else if (right) { state.ship.x = clamp(state.ship.x + state.ship.speed, 6, BASE_W - state.ship.w - 6); state.ship.tilt = 0.12; }
+else { state.ship.tilt *= 0.84; }
+
+// shooting
+if (shoot && state.frame - state.lastShot > state.shotCooldown) {
+const bx = state.ship.x + state.ship.w/2;
+state.bullets.push({ x: bx, y: state.ship.y - 6, vy: -9, life: 220 });
+state.lastShot = state.frame;
+playBeep(720, 0.05, 'square');
+}
+
+// bullets move
+state.bullets.forEach(b => { b.y += b.vy; b.life--; });
+state.bullets = state.bullets.filter(b => b.y > -20 && b.life > 0);
+
+// spawn aliens (only when no boss)
+if (!state.boss) {
+state.spawnTimer++;
+if (state.spawnTimer >= state.spawnInterval) { spawnAlien(); state.spawnTimer = 0; }
+}
+
+// update aliens
+for (let i = state.aliens.length - 1; i >= 0; i--) {
+const a = state.aliens[i];
+a.y += a.speed;
+a.pulse += 0.08;
+if (a.shooter && state.frame >= a.nextShot) {
+// fire aimed bullet
+const shipCx = state.ship.x + state.ship.w/2;
+const shipCy = state.ship.y + state.ship.h/2;
+let dx = shipCx - a.x + rand(-8,8), dy = shipCy - a.y + rand(-6,6);
+const len = Math.hypot(dx,dy) || 1;
+const s = 2.1 + Math.random()*0.7;
+state.alienBullets.push({ x: a.x, y: a.y, vx: dx/len*s, vy: dy/len*s, life: 260 });
+a.nextShot = state.frame + 60 + Math.floor(Math.random()*140);
+}
+if (a.y > BASE_H + 30) state.aliens.splice(i,1);
+}
+
+// move alien bullets
+for (let i = state.alienBullets.length - 1; i >= 0; i--) {
+const b = state.alienBullets[i];
+b.x += b.vx; b.y += b.vy; b.life--;
+if (b.y > BASE_H + 40 || b.life <= 0 || b.x < -40 || b.x > BASE_W + 40) state.alienBullets.splice(i,1);
+}
+
+// bullets vs normal aliens
+for (let bi = state.bullets.length - 1; bi >= 0; bi--) {
+const B = state.bullets[bi];
+let hit = false;
+for (let ai = state.aliens.length - 1; ai >= 0; ai--) {
+const A = state.aliens[ai];
+const d = Math.hypot(A.x - B.x, A.y - B.y);
+if (d < A.r + 6) {
+createExplosion(A.x, A.y, 8);
+playBeep(300 + Math.random()*160, 0.08, 'sine');
+state.score += Math.max(1, Math.floor(A.r / 10));
+state.aliens.splice(ai,1);
+state.bullets.splice(bi,1);
+hit = true; break;
+}
+}
+if (hit) continue;
+// boss hit
+if (state.boss) {
+const dd = Math.hypot(state.boss.x - B.x, state.boss.y - B.y);
+if (dd < (state.boss.size || 60) * 0.9) {
+const dmg = 3 + Math.floor(Math.random()*3);
+state.boss.health = Math.max(0, state.boss.health - dmg);
+createExplosion(B.x, B.y, 6);
+state.bullets.splice(bi,1);
+playBeep(360, 0.06, 'sine');
+if (state.boss.health <= 0) {
+// boss defeated
+const level = state.boss.level;
+state.score += 5; // bonus
+state.lives = Math.min(9, state.lives + 1);
+createExplosion(state.boss.x, state.boss.y, 30);
+state.boss = null;
+if (state.score >= 100 || level >= 5) {
+state.playing = false; state.gameWin = true; finishGame(true); return;
+}
+}
+}
+}
+}
+
+// alien bullets vs ship
+for (let i=state.alienBullets.length-1;i>=0;i--){
+const ab = state.alienBullets[i];
+const shipCx = state.ship.x + state.ship.w/2;
+const shipCy = state.ship.y + state.ship.h/2;
+if (Math.hypot(ab.x - shipCx, ab.y - shipCy) < 14) {
+createExplosion(shipCx, state.ship.y + 6, 12);
+playBeep(120, 0.16, 'sawtooth');
+state.lives--; state.alienBullets.splice(i,1);
+if (state.lives <= 0) { state.playing = false; state.gameOver = true; finishGame(false); return; }
+}
+}
+
+// aliens vs ship
+for (let i=state.aliens.length-1;i>=0;i--){
+const A = state.aliens[i];
+const shipCx = state.ship.x + state.ship.w/2;
+const shipCy = state.ship.y + state.ship.h/2;
+if (Math.hypot(A.x - shipCx, A.y - shipCy) < A.r + 12) {
+createExplosion(shipCx, shipCy, 12);
+state.aliens.splice(i,1);
+state.lives--;
+playBeep(90, 0.16, 'triangle');
+if (state.lives <= 0) { state.playing = false; state.gameOver = true; finishGame(false); return; }
+}
+}
+
+// explosion decay
+state.explosions.forEach(ex => { ex.x += ex.vx; ex.y += ex.vy; ex.life--; });
+state.explosions = state.explosions.filter(ex => ex.life > 0);
+
+// boss movement & firing
+if (state.boss) {
+const b = state.boss;
+b.x += b.vx;
+if (b.x < 60) { b.x = 60; b.vx *= -1; }
+if (b.x > BASE_W - 60) { b.x = BASE_W - 60; b.vx *= -1; }
+b.osc += 0.04;
+if (state.frame - b.lastShot >= b.shootInterval) { bossFire(b); b.lastShot = state.frame; }
+}
+
+// maybe spawn boss if threshold hit
+trySpawnBoss();
+}
+
+/* ---------- Draw routines ---------- */
+function drawBackground() {
+ctx.fillStyle = '#000014'; ctx.fillRect(0,0,BASE_W,BASE_H);
+// nebulas
+state.nebulas.forEach((n, idx) => {
+const hue = (n.hue + (state.frame*0.12 + n.offset)) % 360;
+const grad = ctx.createRadialGradient(n.x, n.y, n.r*0.05, n.x, n.y, n.r*1.2);
+grad.addColorStop(0, `hsla(${hue},70%,60%,0.10)`);
+grad.addColorStop(0.4, `hsla(${(hue+40)%360},60%,40%,0.06)`);
+grad.addColorStop(1, 'transparent');
+ctx.fillStyle = grad; ctx.fillRect(0,0,BASE_W,BASE_H);
+});
+// stars layers
+for (let L=0; L<state.starsLayers.length; L++){
+const layer = state.starsLayers[L];
+const alpha = 0.95 - L*0.22;
+ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+layer.forEach(s => { ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill(); });
+}
+}
+
+function drawShip() {
+const s = state.ship;
+const cx = s.x + s.w/2, cy = s.y + s.h/2;
+ctx.save(); ctx.translate(cx, cy); ctx.rotate(s.tilt);
+// hull
+const hull = ctx.createLinearGradient(-s.w/2, -s.h/2, s.w/2, s.h/2);
+hull.addColorStop(0, '#07f3ff'); hull.addColorStop(0.6, '#006b9a'); hull.addColorStop(1, '#032b3a');
+ctx.fillStyle = hull; ctx.shadowColor = 'rgba(0,255,200,0.5)'; ctx.shadowBlur = 8;
+ctx.beginPath(); ctx.moveTo(0, -s.h/2); ctx.lineTo(-s.w/2, s.h/2); ctx.lineTo(s.w/2, s.h/2); ctx.closePath(); ctx.fill();
+ctx.shadowBlur = 0;
+// cockpit
+const cock = ctx.createRadialGradient(0,0,2,0,0,10); cock.addColorStop(0,'rgba(255,255,255,0.95)'); cock.addColorStop(1,'rgba(0,160,180,0.12)');
+ctx.fillStyle = cock; ctx.beginPath(); ctx.arc(0, -2, 7, 0, Math.PI*2); ctx.fill();
+// engine flame
+const flameH = 12 + Math.abs(Math.sin(state.frame*0.28))*8;
+const flame = ctx.createLinearGradient(0, s.h/2, 0, s.h/2 + flameH);
+flame.addColorStop(0, 'rgba(255,220,80,0.95)'); flame.addColorStop(1, 'rgba(200,40,10,0.55)');
+ctx.fillStyle = flame; ctx.beginPath(); ctx.moveTo(-8, s.h/2); ctx.lineTo(0, s.h/2 + flameH); ctx.lineTo(8, s.h/2); ctx.closePath(); ctx.fill();
+ctx.restore();
+}
+
+function drawAliens() {
+state.aliens.forEach(a => {
+ctx.save(); ctx.translate(a.x, a.y);
+const baseR = a.r;
+const glow = ctx.createRadialGradient(0,0, baseR*0.1, 0,0, baseR*1.6);
+glow.addColorStop(0, `hsla(${a.hue},80%,60%,0.22)`); glow.addColorStop(1,'transparent'); ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(0,0, baseR*1.6,0,Math.PI*2); ctx.fill();
+for (let i=0;i<6;i++){
+const ang = i*(Math.PI*2/6) + Math.sin(a.pulse + i)*0.28;
+ctx.beginPath(); ctx.ellipse(Math.cos(ang)*(baseR*0.45), Math.sin(ang)*(baseR*0.45), baseR*0.6, baseR*0.25, ang, 0, Math.PI*2);
+ctx.fillStyle = `hsl(${a.hue},70%,45%)`; ctx.fill();
+}
+ctx.beginPath(); ctx.arc(0,0, baseR*0.62, 0, Math.PI*2); ctx.fillStyle = `hsl(${a.hue},65%,50%)`; ctx.fill();
+ctx.beginPath(); ctx.fillStyle='#111'; ctx.arc(-baseR*0.28,-baseR*0.18, baseR*0.14, 0, Math.PI*2); ctx.arc(baseR*0.28,-baseR*0.18, baseR*0.14, 0, Math.PI*2); ctx.fill();
+ctx.beginPath(); ctx.fillStyle='rgba(255,80,80,0.98)'; ctx.arc(-baseR*0.28,-baseR*0.18, baseR*0.06,0,Math.PI*2); ctx.arc(baseR*0.28,-baseR*0.18, baseR*0.06,0,Math.PI*2); ctx.fill();
+ctx.restore();
+});
+}
+
+function drawBulletsAndExplosions() {
+// player lasers
+ctx.fillStyle = '#ff6b9b';
+state.bullets.forEach(b => { ctx.fillRect(b.x - 2, b.y - 12, 4, 12); ctx.fillStyle = 'rgba(255,107,155,0.12)'; ctx.fillRect(b.x - 6, b.y - 12, 12, 12); ctx.fillStyle = '#ff6b9b'; });
+// alien bullets
+state.alienBullets.forEach(ab => { ctx.beginPath(); ctx.fillStyle = '#ffd86b'; ctx.arc(ab.x, ab.y, 4.5, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = 'rgba(255,216,107,0.12)'; ctx.beginPath(); ctx.arc(ab.x, ab.y, 10,0,Math.PI*2); ctx.fill(); });
+// explosions
+state.explosions.forEach(ex => { ctx.beginPath(); ctx.fillStyle = `hsla(${ex.color},90%,60%, ${Math.max(0.06, ex.life/28)})`; ctx.arc(ex.x, ex.y, Math.max(2, ex.life/3), 0, Math.PI*2); ctx.fill(); });
+}
+
+function drawBossAndHUD() {
+// boss
+if (state.boss) {
+const b = state.boss;
+if (b.draw) b.draw(b);
+// boss healthbar
+const w = BASE_W * 0.72, h = 12;
+const x = (BASE_W - w)/2, y = 12;
+ctx.fillStyle = 'rgba(255,255,255,0.06)'; roundRect(ctx, x-3, y-3, w+6, h+6, 6, true);
+ctx.fillStyle = 'rgba(20,20,30,0.95)'; roundRect(ctx, x, y, w, h, 6, true);
+const ratio = clamp(b.health / b.maxHealth, 0, 1);
+const g = ctx.createLinearGradient(x, y, x+w, y); g.addColorStop(0, '#ff6b6b'); g.addColorStop(0.5, '#ffd86b'); g.addColorStop(1, '#6bffb8');
+ctx.fillStyle = g; roundRect(ctx, x, y, w*ratio, h, 6, true);
+ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.font = '12px system-ui, Arial'; ctx.textAlign = 'center'; ctx.fillText(`BOSS — ${b.type.toUpperCase()} HP ${b.health}/${b.maxHealth}`, BASE_W/2, y + h + 12);
+ctx.textAlign = 'left';
+}
+// score & lives & high
+ctx.fillStyle = 'rgba(0,255,200,0.95)'; ctx.font = '14px system-ui, Arial'; ctx.fillText(`SCORE: ${state.score}`, 16, 20);
+ctx.fillStyle = 'rgba(255,120,120,0.95)'; ctx.font = '13px system-ui, Arial'; ctx.fillText('LIVES:', 16, 40);
+for (let i=0;i<state.lives;i++) drawHeart(80 + i*18, 33, 8);
+ctx.fillStyle = 'rgba(180,220,255,0.9)'; ctx.textAlign = 'right'; ctx.font = '12px system-ui, Arial'; ctx.fillText(`HIGH: ${state.highScore}`, BASE_W - 12, 18); ctx.textAlign = 'left';
+}
+
+/* helpers */
+function roundRect(ctx,x,y,w,h,r, fill) { ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); if (fill) ctx.fill(); }
+function drawHeart(cx, cy, size) {
+ctx.save(); ctx.translate(cx, cy);
+ctx.fillStyle = 'rgba(255,80,80,0.95)'; ctx.beginPath();
+ctx.moveTo(0, -size/2);
+ctx.bezierCurveTo(size/2, -size, size*1.2, -size/6, 0, size);
+ctx.bezierCurveTo(-size*1.2, -size/6, -size/2, -size, 0, -size/2);
+ctx.fill(); ctx.restore();
+}
+
+/* ---------- Render ---------- */
+function render() {
+drawBackground();
+drawAliens();
+drawBulletsAndExplosions();
+drawShip();
+drawBossAndHUD();
+}
+
+/* ---------- Main update+draw loop ---------- */
+function loop() {
+update();
+ctx.clearRect(0,0,BASE_W,BASE_H);
+render();
+requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+/* ---------- Game control functions ---------- */
+function resetGameState() {
+state.bullets = []; state.aliens = []; state.alienBullets = []; state.explosions = [];
+state.score = 0; state.lives = 3; state.frame = 0; state.playing = false; state.gameOver = false; state.gameWin = false;
+state.spawnInterval = 60; state.spawnTimer = 0; state.alienBaseSpeed = 1.2; state.lastShot = -90;
+state.boss = null; state.nextBossIndex = 0;
+initBackground();
+}
+resetGameState();
+
+const startOverlay = document.getElementById('startOverlay');
+const endOverlay = document.getElementById('endOverlay');
+const playBtn = document.getElementById('playBtn');
+const restartBtn = document.getElementById('restartBtn');
+const endTitle = document.getElementById('endTitle');
+const endText = document.getElementById('endText');
+
+function startGame() {
+resetGameState();
+state.playing = true;
+startOverlay.style.display = 'none';
+endOverlay.style.display = 'none';
+state.spawnTimer = state.spawnInterval - 8;
+playBeep(280, 0.06, 'sine');
+}
+function finishGame(win) {
+if (state.score > state.highScore) { state.highScore = state.score; saveHigh(); }
+endOverlay.style.display = 'flex';
+endTitle.textContent = win ? 'YOU WIN! 🎉' : 'GAME OVER';
+endText.textContent = `You scored ${state.score} points.`;
+}
+playBtn.addEventListener('click', startGame);
+restartBtn.addEventListener('click', startGame);
+
+/* ---------- Spawn and try spawn boss ---------- */
+function trySpawnBoss() {
+if (state.boss) return;
+if (state.nextBossIndex >= state.bossQueue.length) return;
+const threshold = state.bossQueue[state.nextBossIndex];
+if (state.score >= threshold) {
+state.boss = makeBoss(state.nextBossIndex + 1);
+state.nextBossIndex++;
+}
+}
+
+/* ---------- Helper: spawnAlien used earlier ---------- */
+// (spawnAlien already defined above)
+
+/* ---------- BossFire function was already defined ---------- */
+
+/* ---------- DrawBackground and other draw functions already defined ---------- */
+
+/* Note: some functions (spawnAlien etc.) were defined earlier in this file. */
+
+/* ---------- Resize focus and keyboard friendly ---------- */
+canvas.tabIndex = 0;
+canvas.addEventListener('click', () => { try { canvas.focus(); } catch(e){} });
+
+/* smaller initial render to show HUD before play */
+(function initialDraw(){
+ctx.clearRect(0,0,BASE_W,BASE_H);
+drawBackground(); drawShip(); drawAliens(); drawBulletsAndExplosions(); drawBossAndHUD();
+})();
+
+</script>
+</body>
+</html>
