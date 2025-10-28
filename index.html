@@ -55,10 +55,11 @@
       background: white;
       border-radius: 12px;
       box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-      transition: transform 0.3s ease;
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
     }
     section:hover {
       transform: translateY(-5px);
+      box-shadow: 0 10px 20px rgba(0,0,0,0.15);
     }
 
     /* Projects */
@@ -122,6 +123,11 @@
       margin-top: 40px;
       font-size: 0.9rem;
     }
+
+    /* Smooth Scroll */
+    html {
+      scroll-behavior: smooth;
+    }
   </style>
 </head>
 <body>
@@ -146,6 +152,20 @@
   <section class="projects">
     <h2>Projects</h2>
     <ul>
+      <li>
+        <strong>
+          <a href="https://colab.research.google.com/drive/1dvYPxUTdpB0WCwt2rtngKkbIKjlxqRoa#scrollTo=LCipOiqW5QJU" target="_blank">
+            Programming Fundamentals
+          </a>
+        </strong>
+      </li>
+      <li>
+        <strong>
+          <a href="https://chatgpt.com/share/6900e4d4-382c-800d-b5f7-b3edadb72b14" target="_blank">
+            Programming Learning Journey
+          </a>
+        </strong>
+      </li>
       <li>
         <strong><a href="https://renxzy-ss.github.io/sumeen22/spaceship-game.html" target="_blank">My game initially</a></strong>
       </li>
