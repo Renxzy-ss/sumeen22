@@ -1,1 +1,316 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>CSV Analyzer with Anomaly Detection</title>
 
+<!-- Papa Parse CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+    }
+    table {
+        border-collapse: collapse;
+        margin-top: 20px;
+        width: 100%;
+    }
+    th, td {
+        border: 1px solid #ddd;
+        padding: 6px 8px;
+        font-size: 14px;
+        text-align: left;
+    }
+    th {
+        background: #f0f0f0;
+        cursor: pointer;
+    }
+    tr:nth-child(even){
+        background: #fafafa;
+    }
+    .anom-row {
+        background-color: #ffe2e2 !important;
+    }
+    .anom-cell {
+        background-color: #ffbfbf !important;
+        font-weight: bold;
+    }
+    .stats-box {
+        background: #f8f8f8;
+        padding: 10px;
+        border: 1px solid #ccc;
+        margin-top: 20px;
+    }
+    .filter-box {
+        background: #eef6ff;
+        padding: 10px;
+        border: 1px solid #99c0ff;
+        margin-top: 20px;
+    }
+</style>
+</head>
+<body>
+
+<h2>📊 CSV Analyzer with Full Anomaly Detection</h2>
+
+<input type="file" id="csvFile" accept=".csv">
+
+<div id="statsOutput" class="stats-box" style="display:none;"></div>
+<div id="anomalyOutput" class="stats-box" style="display:none;"></div>
+
+<div id="filterUI" class="filter-box" style="display:none;">
+    <h3>Filters</h3>
+    <label>Select Column:</label>
+    <select id="filterColumn"></select>
+
+    <label>Condition:</label>
+    <select id="filterType">
+        <option value="contains">Contains</option>
+        <option value="equals">Equals</option>
+        <option value="greater">Greater Than</option>
+        <option value="less">Less Than</option>
+    </select>
+
+    <input type="text" id="filterValue" placeholder="Value...">
+    <button onclick="applyFilter()">Apply Filter</button>
+    <button onclick="clearFilter()">Clear</button>
+</div>
+
+<table>
+    <thead id="tableHead"></thead>
+    <tbody id="tableBody"></tbody>
+</table>
+
+<script>
+let headers = [];
+let dataRows = [];
+let originalRows = [];
+let anomalyResults = [];
+
+/* -------------------------------
+   NUMERIC CHECK
+--------------------------------*/
+function isNumeric(val){
+    return val !== null && val !== "" && !isNaN(Number(val));
+}
+
+/* -------------------------------
+   BASIC STATS
+--------------------------------*/
+function getStats(values){
+    const nums = values.map(Number);
+    const n = nums.length;
+
+    const mean = nums.reduce((a,b)=>a+b,0) / n;
+    const variance = nums.reduce((a,b)=>a+(b-mean)**2,0) / n;
+    const std = Math.sqrt(variance);
+
+    const sorted = nums.slice().sort((a,b)=>a-b);
+    const median = sorted[Math.floor(n/2)];
+
+    const q1 = sorted[Math.floor(n*0.25)];
+    const q3 = sorted[Math.floor(n*0.75)];
+    const iqr = q3 - q1;
+
+    return { mean, median, std, min:sorted[0], max:sorted[n-1], q1, q3, iqr, count:n };
+}
+
+/* -----------------------------------------
+   ANOMALY DETECTION
+-----------------------------------------*/
+function detectAnomalies(dataRows, headers){
+    const anomalies = [];
+
+    headers.forEach((colName, colIndex)=>{
+
+        const numericValues = dataRows
+            .map(r => r[colIndex])
+            .filter(v => isNumeric(v))
+            .map(Number);
+
+        if(numericValues.length === 0) return;
+
+        const { mean, std, q1, q3, iqr } = getStats(numericValues);
+
+        const lowerStd = mean - 3 * std;
+        const upperStd = mean + 3 * std;
+        const lowerIQR = q1 - 1.5 * iqr;
+        const upperIQR = q3 + 1.5 * iqr;
+
+        dataRows.forEach((row, rowIndex)=>{
+            const val = row[colIndex];
+            if(!isNumeric(val)) return;
+            const x = Number(val);
+
+            let triggered = [];
+
+            // Z-Score
+            const z = (x - mean) / std;
+            if(Math.abs(z) > 3) triggered.push("z-score");
+
+            // Standard Deviation
+            if(x < lowerStd || x > upperStd) triggered.push("std-dev");
+
+            // IQR
+            if(x < lowerIQR || x > upperIQR) triggered.push("iqr");
+
+            if(triggered.length > 0){
+                anomalies.push({
+                    rowIndex,
+                    column: colName,
+                    columnIndex: colIndex,
+                    value: x,
+                    zScore: z.toFixed(3),
+                    methodsTriggered: triggered
+                });
+            }
+        });
+    });
+
+    return anomalies;
+}
+
+/* -----------------------------------------
+   RENDER TABLE
+-----------------------------------------*/
+function renderTable(){
+    const th = document.getElementById("tableHead");
+    const tb = document.getElementById("tableBody");
+
+    th.innerHTML = "<tr>" + headers.map(h => `<th>${h}</th>`).join("") + "</tr>`;
+    tb.innerHTML = "";
+
+    dataRows.forEach((row, rIndex)=>{
+        const tr = document.createElement("tr");
+
+        // Mark whole row if anomalous
+        const rowHasAnomaly = anomalyResults.some(a => a.rowIndex === rIndex);
+        if(rowHasAnomaly) tr.classList.add("anom-row");
+
+        row.forEach((cell, cIndex)=>{
+            const td = document.createElement("td");
+            td.textContent = cell;
+
+            // Mark only specific anomaly cell
+            if(anomalyResults.some(a => a.rowIndex === rIndex && a.columnIndex === cIndex)){
+                td.classList.add("anom-cell");
+            }
+
+            tr.appendChild(td);
+        });
+        tb.appendChild(tr);
+    });
+}
+
+/* -----------------------------------------
+   FILTERING
+-----------------------------------------*/
+function applyFilter(){
+    const col = document.getElementById("filterColumn").value;
+    const type = document.getElementById("filterType").value;
+    const val = document.getElementById("filterValue").value.toLowerCase();
+
+    dataRows = originalRows.filter(row => {
+        const cell = String(row[col]).toLowerCase();
+
+        switch(type){
+            case "contains": return cell.includes(val);
+            case "equals": return cell === val;
+            case "greater": return Number(cell) > Number(val);
+            case "less": return Number(cell) < Number(val);
+        }
+    });
+
+    renderTable();
+}
+function clearFilter(){
+    dataRows = [...originalRows];
+    renderTable();
+}
+
+/* -----------------------------------------
+   LOAD CSV
+-----------------------------------------*/
+document.getElementById("csvFile").addEventListener("change", function(){
+    Papa.parse(this.files[0], {
+        complete: function(results){
+            headers = results.data[0];
+            dataRows = results.data.slice(1).filter(r => r.length === headers.length);
+            originalRows = [...dataRows];
+
+            // Stats
+            displayStats();
+
+            // Anomalies
+            anomalyResults = detectAnomalies(dataRows, headers);
+            displayAnomalies();
+
+            // Filters UI
+            setupFilterUI();
+
+            // Render table
+            renderTable();
+        }
+    });
+});
+
+/* -----------------------------------------
+   DISPLAY STATS
+-----------------------------------------*/
+function displayStats(){
+    let html = "<h3>Basic Statistics</h3>";
+    headers.forEach((h, i)=>{
+        const nums = dataRows.map(r=>r[i]).filter(isNumeric).map(Number);
+        if(nums.length === 0) return;
+
+        const s = getStats(nums);
+        html += `
+            <b>${h}</b><br>
+            Count: ${s.count}<br>
+            Mean: ${s.mean.toFixed(3)}<br>
+            Median: ${s.median}<br>
+            Std Dev: ${s.std.toFixed(3)}<br>
+            Min: ${s.min}<br>
+            Max: ${s.max}<br><br>
+        `;
+    });
+
+    const box = document.getElementById("statsOutput");
+    box.innerHTML = html;
+    box.style.display = "block";
+}
+
+/* -----------------------------------------
+   DISPLAY ANOMALY REPORT
+-----------------------------------------*/
+function displayAnomalies(){
+    let html = `<h3>Detected Anomalies (${anomalyResults.length})</h3>`;
+
+    anomalyResults.forEach(a=>{
+        html += `
+            Row ${a.rowIndex + 1}, Column: <b>${a.column}</b><br>
+            Value: ${a.value}<br>
+            Methods: ${a.methodsTriggered.join(", ")}<br><br>
+        `;
+    });
+
+    const box = document.getElementById("anomalyOutput");
+    box.innerHTML = html;
+    box.style.display = "block";
+}
+
+/* -----------------------------------------
+   INITIALIZE FILTER DROPDOWN
+-----------------------------------------*/
+function setupFilterUI(){
+    const sel = document.getElementById("filterColumn");
+    sel.innerHTML = headers.map((h,i)=>`<option value="${i}">${h}</option>`).join("");
+    document.getElementById("filterUI").style.display = "block";
+}
+
+</script>
+
+</body>
+</html>
