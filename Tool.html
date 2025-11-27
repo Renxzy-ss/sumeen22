@@ -1,0 +1,859 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>CSV Analyzer — Single File Tool</title>
+
+<!-- PapaParse (CSV parsing) -->
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<!-- Chart.js (visualizations) -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<style>
+  :root{
+    --bg:#0f1724; --card:#0b1220; --muted:#9aa7b6; --accent:#4fc3f7;
+    --good:#e6fffa; --bad:#ffefef;
+  }
+  html,body{height:100%; margin:0; font-family:Inter,system-ui,Arial; background:linear-gradient(180deg,#071126 0%, #081229 60%); color:#e6eef6}
+  .container{max-width:1200px;margin:20px auto;padding:18px;background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));border-radius:12px;box-shadow:0 6px 30px rgba(2,6,23,0.6)}
+  header{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+  h1{margin:0;font-size:20px}
+  .controls{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px}
+  .file-input{background:#0b1320;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.03);display:inline-flex;align-items:center;gap:8px}
+  input[type=file]{display:inline-block}
+  .btn{background:var(--accent);color:#04202a;padding:8px 10px;border-radius:8px;border:none;cursor:pointer;font-weight:600}
+  .small{font-size:13px;color:var(--muted)}
+  .grid{display:grid;grid-template-columns:1fr 360px;gap:18px;margin-top:18px}
+  .card{background:linear-gradient(180deg,rgba(255,255,255,0.01),rgba(255,255,255,0.00));padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.03)}
+  #table-wrap{overflow:auto;max-height:520px;border-radius:8px;border:1px solid rgba(255,255,255,0.025);margin-top:12px}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:8px 10px;text-align:left;font-size:13px;border-bottom:1px solid rgba(255,255,255,0.02)}
+  th{position:sticky;top:0;background:rgba(2,8,15,0.6);backdrop-filter: blur(3px);z-index:3}
+  tr.anom-row{background:linear-gradient(90deg, rgba(255,200,200,0.04), transparent)}
+  td.anom-cell{background:linear-gradient(90deg, rgba(255,90,90,0.14), rgba(255,90,90,0.04));font-weight:700}
+  .stats-table td{font-size:13px}
+  .filters{display:flex;flex-direction:column;gap:10px;margin-top:8px}
+  .filter-row{display:flex;gap:8px;align-items:center}
+  .filter-row input, .filter-row select{padding:6px;border-radius:6px;border:1px solid rgba(255,255,255,0.05);background:rgba(255,255,255,0.02);color:inherit}
+  .footer-controls{display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap}
+  .muted{color:var(--muted);font-size:13px}
+  .stat-key{min-width:120px;font-weight:700}
+  #stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:8px}
+  .stat-card{padding:8px;border-radius:8px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.02)}
+  .small-chart{width:100%;height:120px}
+  .badge{padding:6px 8px;border-radius:8px;background:rgba(255,255,255,0.03);font-size:13px}
+  .export-btn{background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--accent);padding:6px 8px;border-radius:8px;cursor:pointer}
+  .kpi{display:flex;gap:8px;align-items:center}
+  .modal{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(2,6,10,0.6);z-index:999;opacity:0;pointer-events:none;transition:opacity .15s}
+  .modal.show{opacity:1;pointer-events:auto}
+  .modal .inner{width:720px;max-width:96%;background:#071126;padding:14px;border-radius:10px;border:1px solid rgba(255,255,255,0.03)}
+  .close-x{float:right;cursor:pointer}
+  .help{font-size:13px;color:var(--muted);margin-top:6px}
+  @media (max-width:900px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>CSV Analyzer</h1>
+        <div class="small muted">Upload any CSV, inspect data, compute stats, find anomalies, and filter rows — single file tool.</div>
+      </div>
+    </header>
+
+    <div class="controls">
+      <label class="file-input">
+        <input id="fileInput" type="file" accept=".csv,text/csv" />
+        <span class="small">Choose CSV</span>
+      </label>
+
+      <button id="exampleBtn" class="btn">Load Example CSV</button>
+
+      <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
+        <div class="small muted">Anomaly method</div>
+        <select id="methodSelect" style="padding:6px;border-radius:6px;background:transparent;color:inherit">
+          <option value="both">Z-score & k·σ (both)</option>
+          <option value="z">Z-score only</option>
+          <option value="k">k·σ only</option>
+        </select>
+        <div class="small muted">z threshold</div>
+        <input id="zThresh" type="number" step="0.1" value="3" style="width:64px"/>
+        <div class="small muted">k × std</div>
+        <input id="kThresh" type="number" step="0.1" value="2" style="width:64px"/>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div><strong>Data</strong> <span id="rowCount" class="muted small">No file loaded</span></div>
+          <div class="kpi">
+            <button id="exportFiltered" class="export-btn" title="Download filtered rows CSV">Export filtered CSV</button>
+            <button id="resetFilters" class="export-btn">Reset filters</button>
+          </div>
+        </div>
+
+        <div id="table-wrap">
+          <table id="dataTable">
+            <thead id="tableHead"><tr><th>Upload a CSV to show data</th></tr></thead>
+            <tbody id="tableBody"><tr><td class="small muted">No data</td></tr></tbody>
+          </table>
+        </div>
+
+        <div class="footer-controls">
+          <div class="small muted">Page size</div>
+          <select id="pageSize">
+            <option>25</option><option>50</option><option>100</option><option>250</option>
+          </select>
+          <div class="small muted">Sort by</div>
+          <select id="sortColumn"></select>
+          <select id="sortDirection"><option value="asc">asc</option><option value="desc">desc</option></select>
+          <button id="applySort" class="export-btn">Apply</button>
+        </div>
+      </div>
+
+      <aside class="card">
+        <strong>Columns & Filters</strong>
+        <div id="columnsList" class="filters">
+          <div class="small muted">Load a file to populate columns and filters.</div>
+        </div>
+
+        <div style="margin-top:10px">
+          <strong>Statistics (numeric columns)</strong>
+          <div id="stats-grid"></div>
+          <div class="help">Click any <span class="badge">View histogram</span> inside a stat card to see distribution and anomaly overlays.</div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- modal for charts -->
+    <div id="modal" class="modal" aria-hidden="true">
+      <div class="inner">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div><strong id="modalTitle">Histogram</strong></div>
+          <div class="close-x" id="closeModal">✕</div>
+        </div>
+        <canvas id="histChart" style="width:100%;height:320px"></canvas>
+        <div class="help">Blue bars = data; red overlay = anomaly cutoff(s).</div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* CSV Analyzer single-file tool
+   - Uses PapaParse (loaded via CDN)
+   - Uses Chart.js for histogram (loaded via CDN)
+*/
+
+let rawRows = [];       // array of original rows (as objects if header present, else array)
+let headers = [];       // column headers (strings)
+let numericCols = [];   // indices of numeric columns
+let parsedTable = [];   // array of rows as arrays of strings (consistent)
+let displayedRows = []; // filtered & sorted slice
+let statsByCol = {};    // computed stats for numeric columns
+let currentPage = 0;
+
+const fileInput = document.getElementById('fileInput');
+const exampleBtn = document.getElementById('exampleBtn');
+const tableHead = document.getElementById('tableHead');
+const tableBody = document.getElementById('tableBody');
+const rowCountLabel = document.getElementById('rowCount');
+const columnsList = document.getElementById('columnsList');
+const statsGrid = document.getElementById('stats-grid');
+const methodSelect = document.getElementById('methodSelect');
+const zThreshInput = document.getElementById('zThresh');
+const kThreshInput = document.getElementById('kThresh');
+const exportBtn = document.getElementById('exportFiltered');
+const resetFiltersBtn = document.getElementById('resetFilters');
+
+const pageSizeSelect = document.getElementById('pageSize');
+const sortColumnSelect = document.getElementById('sortColumn');
+const sortDirectionSelect = document.getElementById('sortDirection');
+const applySortBtn = document.getElementById('applySort');
+
+const modal = document.getElementById('modal');
+const modalTitle = document.getElementById('modalTitle');
+const closeModal = document.getElementById('closeModal');
+let histChart = null;
+
+// Utility helpers
+function isNumericString(s){
+  if(s === null || s === undefined) return false;
+  if(typeof s === 'number') return true;
+  s = String(s).trim();
+  if(s === '') return false;
+  // allow numbers with commas, percent signs, currency characters
+  const cleaned = s.replace(/[,₩$€£%]/g,'').replace(/\s+/g,'');
+  return !isNaN(Number(cleaned));
+}
+function toNumber(s){
+  if(s === null || s === undefined) return NaN;
+  let cleaned = String(s).trim().replace(/[,₩$€£%]/g,'').replace(/\s+/g,'');
+  if(cleaned === '') return NaN;
+  const n = Number(cleaned);
+  return isFinite(n) ? n : NaN;
+}
+function median(arr){
+  if(!arr.length) return NaN;
+  const a = Array.from(arr).filter(v=>!Number.isNaN(v)).sort((x,y)=>x-y);
+  if(a.length === 0) return NaN;
+  const mid = Math.floor(a.length/2);
+  if(a.length % 2 === 0) return (a[mid-1] + a[mid]) / 2;
+  return a[mid];
+}
+function mean(arr){
+  let s=0, c=0;
+  for(const v of arr){ if(!Number.isNaN(v)){ s+=v; c++; } }
+  return c? s/c : NaN;
+}
+function stddevSample(arr){
+  const vals = arr.filter(v=>!Number.isNaN(v));
+  const n = vals.length;
+  if(n<=1) return 0;
+  const m = vals.reduce((a,b)=>a+b,0)/n;
+  let s = 0;
+  for(const v of vals) s += (v-m)*(v-m);
+  // sample standard deviation (n-1)
+  return Math.sqrt(s/(n-1));
+}
+function minVal(arr){ return arr.reduce((acc,v)=>Number.isNaN(v)?acc:Math.min(acc,v), Number.POSITIVE_INFINITY);}
+function maxVal(arr){ return arr.reduce((acc,v)=>Number.isNaN(v)?acc:Math.max(acc,v), Number.NEGATIVE_INFINITY);}
+
+// Load CSV from file (using Papa Parse)
+fileInput.addEventListener('change', (ev)=>{
+  const f = ev.target.files[0];
+  if(!f) return;
+  Papa.parse(f, {
+    skipEmptyLines: false,
+    dynamicTyping: false,
+    complete: (res) => {
+      handleParsed(res.data, res.meta);
+    },
+    error: (err) => alert('Error parsing CSV: '+err.message)
+  });
+});
+
+// Example CSV loader (small example)
+exampleBtn.addEventListener('click', ()=>{
+  const sample = `id,name,age,salary,score
+1,Alice,34,52000,88
+2,Bob,29,48000,92
+3,Charlie,41,115000,55
+4,Dana,22,33000,75
+5,Eve,38,51000,91
+6,Frank,120,7000000,4
+7,Grace,30,49000,90
+8,Heidi,28,,85
+9,Ivan,35,50500,89
+10,Judy,31,49500,90
+`;
+  const parsed = Papa.parse(sample.trim(), {header:false});
+  handleParsed(parsed.data, parsed.meta);
+});
+
+// central handler
+function handleParsed(data, meta){
+  // Papa returns rows as arrays if header:false. We'll check first row to decide header.
+  // We will accept both header:true or header:false in meta. But safer to detect heuristics: if every row length matches first and first row contains non-numeric strings maybe header.
+  let firstRow = data[0] || [];
+  let secondRow = data[1] || [];
+  // remove trailing empty rows introduced by newline at end:
+  while(data.length && data[data.length-1].length === 1 && (data[data.length-1][0] === '' || data[data.length-1][0] === null)) data.pop();
+
+  // If Papa parsed header automatically (meta.fields exists) -> use that
+  if(meta && meta.fields && meta.fields.length){
+    headers = meta.fields;
+    // reconstruct parsedTable as arrays in header order
+    parsedTable = data.map(r => headers.map(h => r[h]===undefined? '' : r[h]));
+  } else {
+    // Heuristic: if first row contains any non-numeric values and second row has numeric or similar lengths -> treat first as header
+    const firstNonEmpty = firstRow.filter(x=>x!=='' && x!==null && x!==undefined).length;
+    const secondNonEmpty = secondRow.filter(x=>x!=='' && x!==null && x!==undefined).length;
+    const firstLooksHeader = firstRow.some(x=>typeof x==='string' && !isNumericString(x)) && secondRow.some(x=>x!=='' && x!==null);
+
+    if(firstLooksHeader){
+      headers = firstRow.map(c => (c===null||c===undefined||String(c).trim()==='') ? 'col_'+Math.random().toString(36).slice(2,6) : String(c).trim());
+      parsedTable = data.slice(1).map(r => {
+        // ensure same length
+        const row = [];
+        for(let i=0;i<headers.length;i++) row.push(r[i]===undefined? '' : r[i]);
+        return row;
+      });
+    } else {
+      // no usable header -> fabricate
+      const colCount = Math.max(...data.map(r=>r.length));
+      headers = [];
+      for(let i=0;i<colCount;i++) headers.push('col_'+(i+1));
+      parsedTable = data.map(r => {
+        const row = [];
+        for(let i=0;i<colCount;i++) row.push(r[i]===undefined? '' : r[i]);
+        return row;
+      });
+    }
+  }
+
+  // normalize rows to match headers length
+  parsedTable = parsedTable.map(r=>{
+    const out = [];
+    for(let i=0;i<headers.length;i++) out.push(r[i]===undefined? '' : r[i]);
+    return out;
+  });
+
+  computeBasics();
+  buildFiltersUI();
+  applyFiltersAndRender();
+  populateSortOptions();
+}
+
+// compute numeric column identification and stats
+function computeBasics(){
+  numericCols = [];
+  statsByCol = {};
+  const colCount = headers.length;
+  const colVals = Array.from({length:colCount}, ()=>[]);
+  for(const row of parsedTable){
+    for(let c=0;c<colCount;c++){
+      const v = row[c];
+      if(isNumericString(v)){
+        colVals[c].push(toNumber(v));
+      } else {
+        // keep NaN placeholder for non-numeric
+        // don't push anything
+      }
+    }
+  }
+  for(let c=0;c<colCount;c++){
+    const vals = colVals[c];
+    // decide numeric if at least 2 numeric values and >20% numeric or >5 numeric values:
+    const numCount = vals.length;
+    const ratio = numCount / Math.max(1, parsedTable.length);
+    const isNum = (numCount >= 5) || (ratio >= 0.2 && numCount >= 2);
+    if(isNum){
+      numericCols.push(c);
+      const m = mean(vals);
+      const med = median(vals);
+      const sd = stddevSample(vals);
+      const mn = (numCount? Math.min(...vals) : NaN);
+      const mx = (numCount? Math.max(...vals) : NaN);
+      statsByCol[c] = {
+        count: numCount,
+        mean: m,
+        median: med,
+        stddev: sd,
+        min: mn,
+        max: mx,
+        values: vals.slice()
+      };
+    }
+  }
+  renderStatsCards();
+}
+
+// render stats cards
+function renderStatsCards(){
+  statsGrid.innerHTML = '';
+  if(Object.keys(statsByCol).length === 0){
+    statsGrid.innerHTML = '<div class="small muted">No numeric columns detected.</div>';
+    return;
+  }
+  for(const cStr of Object.keys(statsByCol)){
+    const c = Number(cStr);
+    const s = statsByCol[c];
+    const card = document.createElement('div');
+    card.className = 'stat-card';
+    card.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><strong>${escapeHtml(headers[c])}</strong><div class="small muted">column ${c+1}</div></div>
+        <div style="text-align:right">
+          <div class="small muted">count <span style="font-weight:700">${s.count}</span></div>
+          <button class="export-btn viewHist" data-col="${c}" style="margin-top:6px">View histogram</button>
+        </div>
+      </div>
+      <div style="margin-top:8px;font-size:13px">
+        <div>mean: <strong>${Number.isNaN(s.mean)?'—':round(s.mean)}</strong></div>
+        <div>median: <strong>${Number.isNaN(s.median)?'—':round(s.median)}</strong></div>
+        <div>min: <strong>${Number.isNaN(s.min)?'—':round(s.min)}</strong> &nbsp; max: <strong>${Number.isNaN(s.max)?'—':round(s.max)}</strong></div>
+        <div>stddev: <strong>${round(s.stddev)}</strong></div>
+      </div>
+    `;
+    statsGrid.appendChild(card);
+  }
+  // hook histogram buttons
+  document.querySelectorAll('.viewHist').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ showHistogram(Number(btn.dataset.col)); });
+  });
+}
+
+function showHistogram(colIdx){
+  if(!statsByCol[colIdx]) { alert('No numeric data for that column.'); return; }
+  modalTitle.textContent = headers[colIdx] + ' — histogram';
+  const values = statsByCol[colIdx].values.slice().filter(v=>!Number.isNaN(v));
+  const bins = histogramBins(values, 30);
+  renderChart(bins, colIdx);
+  modal.classList.add('show');
+}
+closeModal.addEventListener('click', ()=> modal.classList.remove('show'));
+modal.addEventListener('click', (e)=> { if(e.target === modal) modal.classList.remove('show'); });
+
+// simple histogram binning
+function histogramBins(values, binCount){
+  if(values.length===0) return {labels:[],counts:[],min:0,max:0};
+  const mn = Math.min(...values);
+  const mx = Math.max(...values);
+  const range = mx - mn || 1;
+  const width = range / binCount;
+  const counts = Array(binCount).fill(0);
+  const labels = [];
+  for(let i=0;i<binCount;i++){
+    const l = mn + i*width;
+    labels.push(round(l));
+  }
+  for(const v of values){
+    const idx = Math.min(binCount-1, Math.floor((v - mn) / width));
+    counts[idx] += 1;
+  }
+  return {labels, counts, min:mn, max:mx};
+}
+function renderChart(bins, colIdx){
+  const ctx = document.getElementById('histChart').getContext('2d');
+  if(histChart) histChart.destroy();
+  const s = statsByCol[colIdx];
+  const zth = Number(zThreshInput.value) || 3;
+  const kth = Number(kThreshInput.value) || 2;
+  const method = methodSelect.value;
+  const overlays = [];
+  // compute cutoff lines
+  if(method === 'both' || method === 'k') {
+    overlays.push({type:'k', value: s.mean + kth * s.stddev});
+    overlays.push({type:'k', value: s.mean - kth * s.stddev});
+  }
+  if(method === 'both' || method === 'z') {
+    overlays.push({type:'z', value: s.mean + zth * s.stddev});
+    overlays.push({type:'z', value: s.mean - zth * s.stddev});
+  }
+
+  histChart = new Chart(ctx, {
+    type:'bar',
+    data:{
+      labels: bins.labels,
+      datasets:[{
+        label:'count',
+        data: bins.counts,
+        borderWidth:1
+      }]
+    },
+    options:{
+      plugins:{
+        legend:{display:false},
+        tooltip:{mode:'index'}
+      },
+      scales:{
+        x:{title:{display:true,text:'value (bin start)'}},
+        y:{title:{display:true,text:'count'}}
+      },
+      responsive:true,
+      maintainAspectRatio:false,
+      animation:false,
+      plugins:[
+        {
+          id: 'vertical-lines',
+          beforeDraw: (chart, args, options) => {
+            const yScale = chart.scales['y'];
+            const xScale = chart.scales['x'];
+            const ctx = chart.ctx;
+            overlays.forEach(o=>{
+              const value = o.value;
+              // find pixel x position -> approximate by linear mapping from min to max
+              const min = bins.min, max = bins.max || (bins.min + 1);
+              const frac = (value - min) / (max - min);
+              const px = xScale.left + frac * (xScale.width);
+              ctx.save();
+              ctx.beginPath();
+              ctx.moveTo(px, yScale.top);
+              ctx.lineTo(px, yScale.bottom);
+              ctx.strokeStyle = (o.type === 'k') ? 'rgba(255,140,0,0.9)' : 'rgba(255,80,80,0.9)';
+              ctx.lineWidth = 2;
+              ctx.setLineDash([4,4]);
+              ctx.stroke();
+              ctx.restore();
+            });
+          }
+        }
+      ]
+    }
+  });
+}
+
+// escape HTML helper
+function escapeHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function round(x){ if(Number.isNaN(x) || !isFinite(x)) return '—'; return (Math.round(x*100)/100).toLocaleString(); }
+
+// Build column filters UI
+function buildFiltersUI(){
+  columnsList.innerHTML = '';
+  for(let c=0;c<headers.length;c++){
+    const wrapper = document.createElement('div');
+    wrapper.className = 'filter-row';
+    const label = document.createElement('div');
+    label.style.minWidth = '110px';
+    label.innerHTML = `<div style="font-weight:700">${escapeHtml(headers[c])}</div><div class="small muted">col ${c+1}</div>`;
+    wrapper.appendChild(label);
+
+    // determine if numeric
+    const numeric = numericCols.includes(c);
+    if(numeric){
+      const minInp = document.createElement('input');
+      minInp.placeholder = 'min';
+      minInp.type = 'number';
+      minInp.dataset.col = c;
+      minInp.className = 'filter-min';
+      const maxInp = document.createElement('input');
+      maxInp.placeholder = 'max';
+      maxInp.type = 'number';
+      maxInp.dataset.col = c;
+      maxInp.className = 'filter-max';
+      const op = document.createElement('select');
+      op.innerHTML = `<option value="and">AND</option><option value="or">OR</option>`;
+      op.style.width = '60px';
+      wrapper.appendChild(minInp);
+      wrapper.appendChild(maxInp);
+      wrapper.appendChild(op);
+    } else {
+      const txt = document.createElement('input');
+      txt.placeholder = 'contains...';
+      txt.dataset.col = c;
+      txt.className = 'filter-text';
+      wrapper.appendChild(txt);
+      const exact = document.createElement('select');
+      exact.innerHTML = `<option value="contains">contains</option><option value="equals">equals</option><option value="startswith">starts</option><option value="endswith">ends</option>`;
+      exact.style.width='80px';
+      wrapper.appendChild(exact);
+    }
+    columnsList.appendChild(wrapper);
+  }
+
+  // add apply filters button
+  const applyBtn = document.createElement('button');
+  applyBtn.textContent = 'Apply filters';
+  applyBtn.className = 'btn';
+  applyBtn.addEventListener('click', ()=>{ currentPage = 0; applyFiltersAndRender(); });
+  columnsList.appendChild(applyBtn);
+}
+
+// filters logic
+function collectFilters(){
+  const filters = [];
+  const rows = Array.from(columnsList.querySelectorAll('.filter-row'));
+  rows.forEach((r, idx)=>{
+    const col = idx; // mapping due to building in header order
+    const minEl = r.querySelector('.filter-min');
+    if(minEl){
+      const minv = minEl.value;
+      const maxv = r.querySelector('.filter-max').value;
+      const connector = r.querySelector('select')?.value || 'and';
+      if(minv !== '' || maxv !== ''){
+        filters.push({type:'numeric',col, min: (minv!==''? Number(minv) : null), max: (maxv!==''? Number(maxv): null), connector});
+      }
+    } else {
+      const t = r.querySelector('.filter-text');
+      if(t && t.value.trim() !== ''){
+        const mode = r.querySelector('select')?.value || 'contains';
+        filters.push({type:'text', col, value: t.value.trim(), mode});
+      }
+    }
+  });
+  return filters;
+}
+
+// anomaly detection per cell & per-row
+function computeAnomaliesForRow(rowArr){
+  // returns an object {colAnomaly: {colIndex: {z:..., k:...}}, isRowAnom: bool}
+  const out = {colAnomaly:{}, isRowAnom:false};
+  const zth = Number(zThreshInput.value) || 3;
+  const kth = Number(kThreshInput.value) || 2;
+  const method = methodSelect.value;
+
+  for(const c of numericCols){
+    const raw = rowArr[c];
+    if(isNumericString(raw)){
+      const v = toNumber(raw);
+      const s = statsByCol[c];
+      const sd = s.stddev || 0;
+      const z = sd === 0 ? 0 : (v - s.mean) / sd;
+      const kflag = (sd === 0 ? false : Math.abs(v - s.mean) > kth * sd);
+      const zflag = (sd === 0 ? false : Math.abs(z) > zth);
+      let flagged = false;
+      if(method === 'both') flagged = kflag || zflag;
+      else if(method === 'k') flagged = kflag;
+      else flagged = zflag;
+      if(flagged){
+        out.colAnomaly[c] = {z: z, kflag: kflag, zflag: zflag, value: v};
+        out.isRowAnom = true;
+      }
+    }
+  }
+  return out;
+}
+
+// main apply filters & render
+function applyFiltersAndRender(){
+  const filters = collectFilters();
+  // filter rows
+  const filtered = [];
+  const anomalyInfo = [];
+  for(const row of parsedTable){
+    let keep = true;
+    for(const f of filters){
+      const cell = row[f.col];
+      if(f.type === 'numeric'){
+        const v = isNumericString(cell) ? toNumber(cell) : NaN;
+        if(Number.isNaN(v)){
+          // if numeric filter but value non-numeric => doesn't pass
+          keep = false;
+          break;
+        }
+        if(f.min !== null && f.max !== null){
+          if(f.connector === 'and'){
+            if(!(v >= f.min && v <= f.max)){ keep = false; break; }
+          } else {
+            if(!(v >= f.min || v <= f.max)){ keep = false; break; }
+          }
+        } else if(f.min !== null){
+          if(!(v >= f.min)){ keep = false; break; }
+        } else if(f.max !== null){
+          if(!(v <= f.max)){ keep = false; break; }
+        }
+      } else if(f.type === 'text'){
+        const s = String(cell || '');
+        const val = f.value.toLowerCase();
+        if(f.mode === 'contains' && !s.toLowerCase().includes(val)){ keep = false; break; }
+        if(f.mode === 'equals' && s.toLowerCase() !== val){ keep = false; break; }
+        if(f.mode === 'startswith' && !s.toLowerCase().startsWith(val)){ keep = false; break; }
+        if(f.mode === 'endswith' && !s.toLowerCase().endsWith(val)){ keep = false; break; }
+      }
+    }
+    if(keep) {
+      filtered.push(row);
+      anomalyInfo.push(computeAnomaliesForRow(row));
+    }
+  }
+
+  // Apply sorting
+  const sortCol = Number(sortColumnSelect.value);
+  const sortDir = sortDirectionSelect.value;
+  if(!Number.isNaN(sortCol)){
+    filtered.sort((a,b)=>{
+      const A = a[sortCol]; const B = b[sortCol];
+      const aNum = isNumericString(A) ? toNumber(A) : null;
+      const bNum = isNumericString(B) ? toNumber(B) : null;
+      if(aNum !== null && bNum !== null){
+        return sortDir==='asc' ? aNum - bNum : bNum - aNum;
+      } else {
+        const as = String(A||'').toLowerCase();
+        const bs = String(B||'').toLowerCase();
+        if(as < bs) return sortDir==='asc' ? -1 : 1;
+        if(as > bs) return sortDir==='asc' ? 1 : -1;
+        return 0;
+      }
+    });
+  }
+
+  // pagination
+  const pageSize = Number(pageSizeSelect.value);
+  const total = filtered.length;
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  if(currentPage >= pages) currentPage = 0;
+  const start = currentPage * pageSize;
+  const end = Math.min(total, start + pageSize);
+  displayedRows = filtered.slice(start, end);
+  displayedAnomalyInfo = anomalyInfo.slice(start, end);
+
+  renderTable(displayedRows, displayedAnomalyInfo, total);
+}
+
+// render table (current page)
+let displayedAnomalyInfo = [];
+function renderTable(rows, anomInfo, totalCount){
+  // header
+  tableHead.innerHTML = '';
+  const thr = document.createElement('tr');
+  headers.forEach(h=>{
+    const th = document.createElement('th');
+    th.textContent = h;
+    thr.appendChild(th);
+  });
+  tableHead.appendChild(thr);
+
+  // body
+  tableBody.innerHTML = '';
+  if(rows.length === 0){
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = headers.length;
+    td.className = 'small muted';
+    td.textContent = 'No rows matching filters or no data.';
+    tr.appendChild(td);
+    tableBody.appendChild(tr);
+  } else {
+    for(let i=0;i<rows.length;i++){
+      const row = rows[i];
+      const info = anomInfo[i];
+      const tr = document.createElement('tr');
+      if(info && info.isRowAnom) tr.classList.add('anom-row');
+      for(let c=0;c<headers.length;c++){
+        const td = document.createElement('td');
+        td.innerHTML = escapeHtml(row[c]);
+        if(info && info.colAnomaly && info.colAnomaly[c]){
+          td.classList.add('anom-cell');
+          // add tooltip detail
+          const detail = info.colAnomaly[c];
+          td.title = `Anomaly — z=${detail.z.toFixed(2)}  value=${detail.value}`;
+        }
+        tr.appendChild(td);
+      }
+      tableBody.appendChild(tr);
+    }
+  }
+  rowCountLabel.textContent = `${totalCount} rows (showing ${rows.length})`;
+}
+
+// populate sort options
+function populateSortOptions(){
+  sortColumnSelect.innerHTML = '<option value="">(none)</option>';
+  headers.forEach((h,idx)=>{
+    const o = document.createElement('option');
+    o.value = idx;
+    o.textContent = h;
+    sortColumnSelect.appendChild(o);
+  });
+}
+
+// export filtered CSV
+exportBtn.addEventListener('click', ()=>{
+  // re-run filter without pagination to export all filtered rows
+  const filters = collectFilters();
+  const filtered = [];
+  for(const row of parsedTable){
+    let keep = true;
+    for(const f of filters){
+      const cell = row[f.col];
+      if(f.type === 'numeric'){
+        const v = isNumericString(cell) ? toNumber(cell) : NaN;
+        if(Number.isNaN(v)){ keep=false; break; }
+        if(f.min !== null && f.max !== null){
+          if(!(v >= f.min && v <= f.max)){ keep=false; break; }
+        } else if(f.min !== null){
+          if(!(v >= f.min)){ keep=false; break; }
+        } else if(f.max !== null){
+          if(!(v <= f.max)){ keep=false; break; }
+        }
+      } else if(f.type === 'text'){
+        const s = String(cell || '');
+        const val = f.value.toLowerCase();
+        if(f.mode === 'contains' && !s.toLowerCase().includes(val)){ keep=false; break; }
+        if(f.mode === 'equals' && s.toLowerCase() !== val){ keep=false; break; }
+        if(f.mode === 'startswith' && !s.toLowerCase().startsWith(val)){ keep=false; break; }
+        if(f.mode === 'endswith' && !s.toLowerCase().endsWith(val)){ keep=false; break; }
+      }
+    }
+    if(keep) filtered.push(row);
+  }
+
+  // Build CSV: include header
+  const csv = Papa.unparse({fields: headers, data: filtered});
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url;
+  a.download = 'filtered.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+});
+
+// reset filters
+resetFiltersBtn.addEventListener('click', ()=>{
+  // clear inputs
+  document.querySelectorAll('.filter-text, .filter-min, .filter-max').forEach(i=>i.value='');
+  currentPage = 0;
+  applyFiltersAndRender();
+});
+
+// recompute anomalies on threshold or method change
+[zThreshInput, kThreshInput, methodSelect].forEach(el=>{
+  el.addEventListener('change', ()=> applyFiltersAndRender());
+});
+
+// small helpers
+function round2(n){ return Math.round(n*100)/100; }
+
+// pagination by clicking table? show simple controls (prev/next)
+const pager = document.createElement('div');
+pager.style.display='flex';
+pager.style.gap='8px';
+pager.style.marginTop='8px';
+pager.innerHTML = '<button id="prevPage" class="export-btn">◀ Prev</button><div id="pageInfo" class="small muted">Page 1</div><button id="nextPage" class="export-btn">Next ▶</button>';
+document.querySelector('.card').appendChild(pager);
+document.getElementById('prevPage').addEventListener('click', ()=>{
+  if(currentPage>0){ currentPage--; applyFiltersAndRender(); updatePageInfo(); }
+});
+document.getElementById('nextPage').addEventListener('click', ()=>{
+  const pageSize = Number(pageSizeSelect.value);
+  const total = getFilteredCount();
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  if(currentPage < pages-1){ currentPage++; applyFiltersAndRender(); updatePageInfo(); }
+});
+function updatePageInfo(){ const pageSize = Number(pageSizeSelect.value); const total = getFilteredCount(); const pages = Math.max(1, Math.ceil(total/pageSize)); document.getElementById('pageInfo').textContent = `Page ${currentPage+1} / ${pages}`; }
+function getFilteredCount(){
+  // naive: collect filters and count
+  const filters = collectFilters();
+  let count = 0;
+  for(const row of parsedTable){
+    let keep = true;
+    for(const f of filters){
+      const cell = row[f.col];
+      if(f.type === 'numeric'){
+        const v = isNumericString(cell) ? toNumber(cell) : NaN;
+        if(Number.isNaN(v)){ keep=false; break; }
+        if(f.min !== null && f.max !== null){
+          if(!(v >= f.min && v <= f.max)){ keep=false; break; }
+        } else if(f.min !== null){
+          if(!(v >= f.min)){ keep=false; break; }
+        } else if(f.max !== null){
+          if(!(v <= f.max)){ keep=false; break; }
+        }
+      } else if(f.type === 'text'){
+        const s = String(cell || '');
+        const val = f.value.toLowerCase();
+        if(f.mode === 'contains' && !s.toLowerCase().includes(val)){ keep=false; break; }
+        if(f.mode === 'equals' && s.toLowerCase() !== val){ keep=false; break; }
+        if(f.mode === 'startswith' && !s.toLowerCase().startsWith(val)){ keep=false; break; }
+        if(f.mode === 'endswith' && !s.toLowerCase().endsWith(val)){ keep=false; break; }
+      }
+    }
+    if(keep) count++;
+  }
+  return count;
+}
+
+// when sort apply clicked
+applySortBtn.addEventListener('click', ()=>{ currentPage=0; applyFiltersAndRender(); updatePageInfo(); });
+
+// update page size
+pageSizeSelect.addEventListener('change', ()=>{ currentPage = 0; applyFiltersAndRender(); updatePageInfo(); });
+
+// initial state (empty)
+rowCountLabel.textContent = 'No file loaded';
+
+// small utility: compute histogram bins min value for chart plugin
+// ---------------------------------------------
+
+// Ensure the UI updates after compute
+function initialRenderMessage(){
+  tableHead.innerHTML = '<tr><th>No CSV loaded</th></tr>';
+  tableBody.innerHTML = '<tr><td class="small muted">Select a CSV file or press "Load Example CSV".</td></tr>';
+}
+initialRenderMessage();
+
+</script>
+</body>
+</html>
